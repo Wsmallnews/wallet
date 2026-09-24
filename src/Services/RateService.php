@@ -6,6 +6,7 @@ use Wsmallnews\Wallet\Contracts\RateResolverInterface;
 use Wsmallnews\Wallet\Exceptions\WalletException;
 use Wsmallnews\Wallet\Models\WalletRate;
 use Wsmallnews\Wallet\Models\WalletType;
+use Wsmallnews\Wallet\Support\Utils;
 
 /**
  * 汇率解析：钱包锚定率（钱包 ↔ 锚定币种）+ 市场汇率（法币 ↔ 法币）。
@@ -20,7 +21,7 @@ class RateService
      */
     public function baseCurrency(): string
     {
-        $configured = (string) config('sn-wallet.base_currency', '');
+        $configured = (string) Utils::getConfig('base_currency', '');
 
         return strtoupper($configured ?: sn_money()->defaultCurrency());
     }

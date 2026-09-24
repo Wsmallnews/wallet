@@ -20,7 +20,7 @@ class DbRateResolver implements RateResolverInterface
             return '1';
         }
 
-        $config = (array) config('sn-wallet.market_rates', []);
+        $config = (array) Utils::getConfig('market_rates', []);
 
         if (isset($config["{$from}:{$to}"])) {
             return (string) $config["{$from}:{$to}"];

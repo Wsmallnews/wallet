@@ -82,12 +82,4 @@ class WalletType extends SupportModel
     {
         return app('sn-wallet')->type($typeCode, $shouldException);
     }
-
-    /**
-     * 按类型查找模型（供 morph 解析等场景）
-     */
-    public function getMorphClass(): string
-    {
-        return 'sn_wallet_type';
-    }
 }

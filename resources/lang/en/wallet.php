@@ -26,6 +26,11 @@ return [
         'closed' => 'Closed',
     ],
 
+    'errors' => [
+        'insufficient_available' => 'Insufficient :type balance',
+        'insufficient_frozen' => 'Insufficient :type frozen balance',
+    ],
+
     'transactions' => [
         'consume_description' => 'Payment deduction :pay_sn',
         'refund_description' => 'Refund credit :refund_sn',

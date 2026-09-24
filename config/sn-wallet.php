@@ -29,7 +29,8 @@ return [
     |--------------------------------------------------------------------------
     | 记账本位币
     |--------------------------------------------------------------------------
-    | 市场汇率表的轴心币种；null = 站点默认币种（sn-support.currency，可被 app.currency 覆盖）。
+    | 市场汇率表的轴心币种。默认 null = 与站点默认货币一致（app.currency → sn-support.currency → CNY），
+    | 仅当「展示默认币种 ≠ 内部记账轴心」（如面向海外默认 USD 展示、以 CNY 记账）时才需要显式配置。
     | 改本位币不影响存量锚定率——锚定币种随率行自带快照，换算时自动多一跳市场汇率。
     */
     'base_currency' => null,
@@ -90,6 +91,9 @@ return [
     |--------------------------------------------------------------------------
     */
     'panel_register' => [
+        'global_default' => [
+            'navigation_group' => 'sn-wallet::wallet.global_default.navigation_group',
+        ],
         'resources' => [
             WalletResource::class => [
                 'navigation_sort' => 1,
@@ -103,10 +107,6 @@ return [
             RechargeResource::class => [
                 'navigation_sort' => 4,
             ],
-        ],
-
-        'global_default' => [
-            'navigation_group' => fn () => __('sn-wallet::wallet.global_default.navigation_group'),
         ],
     ],
 

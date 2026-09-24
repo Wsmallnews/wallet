@@ -26,6 +26,11 @@ return [
         'closed' => '已关闭',
     ],
 
+    'errors' => [
+        'insufficient_available' => ':type可用余额不足',
+        'insufficient_frozen' => ':type冻结金额不足',
+    ],
+
     'transactions' => [
         'consume_description' => '支付扣款 :pay_sn',
         'refund_description' => '退款回款 :refund_sn',

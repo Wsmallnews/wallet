@@ -6,7 +6,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\MorphTo;
 use Wsmallnews\Support\Models\SupportModel;
 use Wsmallnews\Support\Support\Utils as SupportUtils;
-use Wsmallnews\Wallet\Enums\TransactionType;
+use Wsmallnews\Wallet\Casts\TransactionTypeCast;
 use Wsmallnews\Wallet\Exceptions\WalletException;
 use Wsmallnews\Wallet\Support\Utils;
 
@@ -17,7 +17,7 @@ class WalletTransaction extends SupportModel
     protected $guarded = [];
 
     protected $casts = [
-        'type' => TransactionType::class,
+        'type' => TransactionTypeCast::class,
         'amount' => 'integer',
         'balance_change' => 'integer',
         'frozen_change' => 'integer',
@@ -68,10 +68,5 @@ class WalletTransaction extends SupportModel
     public function team(): BelongsTo
     {
         return $this->belongsTo(SupportUtils::getTenantModel());
-    }
-
-    public function getMorphClass(): string
-    {
-        return 'sn_wallet_transaction';
     }
 }

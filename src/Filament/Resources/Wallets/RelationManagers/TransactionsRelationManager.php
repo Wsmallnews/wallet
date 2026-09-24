@@ -7,7 +7,7 @@ use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
 use Wsmallnews\Support\Filament\Filters\FilterComponents;
-use Wsmallnews\Wallet\Enums\TransactionType;
+use Wsmallnews\Wallet\Support\TransactionTypes;
 
 /**
  * 钱包流水（只读：不可变账本，无新增/编辑/删除入口）。
@@ -36,7 +36,9 @@ class TransactionsRelationManager extends RelationManager
                     ->toggleable(),
                 TextColumn::make('type')
                     ->label(__('sn-wallet::wallet.wallets.transactions_relation.type'))
-                    ->badge(),
+                    ->badge()
+                    ->formatStateUsing(fn ($state) => TransactionTypes::label((string) $state) ?? (string) $state)
+                    ->color(fn ($state) => TransactionTypes::color((string) $state)),
                 TextColumn::make('amount')
                     ->label(__('sn-wallet::wallet.wallets.transactions_relation.amount'))
                     ->formatStateUsing(fn ($record, $state) => (($state < 0 ? '-' : '+') . $record->wallet?->walletType?->format(abs((int) $state))))
@@ -69,7 +71,7 @@ class TransactionsRelationManager extends RelationManager
             ->filters([
                 SelectFilter::make('type')
                     ->label(__('sn-wallet::wallet.wallets.transactions_relation.type'))
-                    ->options(TransactionType::class)
+                    ->options(TransactionTypes::all())
                     ->multiple(),
                 ...FilterComponents::createUpdateRangeFilter(),
             ]);

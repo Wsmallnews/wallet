@@ -67,9 +67,4 @@ class Wallet extends SupportModel
     {
         return $this->walletType?->format((int) $this->frozen) ?? (string) $this->frozen;
     }
-
-    public function getMorphClass(): string
-    {
-        return 'sn_wallet';
-    }
 }

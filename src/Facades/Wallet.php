@@ -7,6 +7,7 @@ use Wsmallnews\Wallet\WalletManager;
 
 /**
  * @method static void registers(array<string, array<string, mixed>> $types)
+ * @method static void registerTransactionTypes(array<string, array<string, mixed>> $types)
  * @method static \Wsmallnews\Wallet\Models\WalletType registerType(string $code, array $params = [])
  * @method static \Wsmallnews\Wallet\Models\WalletType type(string $typeCode, bool $shouldException = true)
  * @method static ?\Wsmallnews\Wallet\Models\Wallet wallet(\Illuminate\Database\Eloquent\Model $owner, string $typeCode)

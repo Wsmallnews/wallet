@@ -13,6 +13,7 @@ use Wsmallnews\Wallet\Models\Wallet;
 use Wsmallnews\Wallet\Models\WalletTransaction;
 use Wsmallnews\Wallet\Models\WalletType;
 use Wsmallnews\Wallet\Services\ConversionService;
+use Wsmallnews\Wallet\Support\TransactionTypes;
 use Wsmallnews\Wallet\Support\Utils;
 
 /**
@@ -23,7 +24,7 @@ use Wsmallnews\Wallet\Support\Utils;
  *  - 每笔变动一条不可变流水（uuid 幂等键），余额更新与流水写入同事务
  *  - 行级锁 + 余额下限校验，不允许负余额（可用与冻结均 >= 0）
  *  - 钱包懒创建：每所有者每类型一条记录，读路径不建行（absent = 0）
- *  - team_id 归属：owner 自带 team_id 属性（Member）则挂租户，否则 NULL 全局（User 跨租户共享）
+ *  - team_id 归属：owner 自带 team_id 属性（Member/Store）则挂租户，否则 NULL 全局（User 跨租户共享）
  */
 class WalletManager
 {
@@ -36,21 +37,34 @@ class WalletManager
 
     public function __construct(protected ConversionService $conversion)
     {
-        $this->declaredTypes = (array) config('sn-wallet.types', []);
+        $this->declaredTypes = (array) Utils::getConfig('types', []);
     }
 
     // ============================== 类型注册 ==============================
 
     /**
-     * 批量声明钱包类型（调用方 ServiceProvider 中调用，如 shop 声明 balance / point）。
+     * 批量声明钱包类型（调用方 ServiceProvider 中调用，如 shop 声明 shop_balance / point）。
      *
      * 代码声明是类型的初始默认值；落库后以数据库为准（后台改锚定率不会被重新部署覆盖）。
+     * 类型 code 即业务命名空间：shop_balance / cms_balance / store_balance 天然相互隔离。
      *
      * @param  array<string, array<string, mixed>>  $types  code => 参数
      */
     public function registers(array $types): void
     {
         $this->declaredTypes = array_merge($this->declaredTypes, $types);
+    }
+
+    /**
+     * 注册自定义流水类型（内置 TransactionType 之外的业务分类，如 commission）。
+     *
+     * 仅当需要独立筛选/统计口径时才注册；区分业务来源用 subject morph + options 即可。
+     *
+     * @param  array<string, array<string, mixed>>  $types  value => ['label' => ..., 'color' => ...]
+     */
+    public function registerTransactionTypes(array $types): void
+    {
+        TransactionTypes::register($types);
     }
 
     /**
@@ -141,7 +155,7 @@ class WalletManager
     /**
      * 入账（frozen=true 直接入冻结，佣金发放等售后窗口场景）
      *
-     * @param  array<string, mixed>  $options  uuid / frozen / transaction_type / subject / causer / description / team_id / meta / transfer_sn
+     * @param  array<string, mixed>  $options  uuid / frozen / transaction_type（枚举或已注册的自定义值）/ subject / causer / description / team_id / meta / transfer_sn
      */
     public function credit(Model $owner, string $typeCode, int $amount, array $options = []): WalletTransaction
     {
@@ -153,11 +167,11 @@ class WalletManager
         $toFrozen = (bool) ($options['frozen'] ?? false);
         $transactionType = $options['transaction_type'] ?? ($toFrozen ? TransactionType::FrozenCredit : TransactionType::Recharge);
 
-        return $this->mutate($wallet, $transactionType, $amount, $toFrozen ? 0 : $amount, $toFrozen ? $amount : 0, $options);
+        return $this->mutate($wallet, $type, $transactionType, $amount, $toFrozen ? 0 : $amount, $toFrozen ? $amount : 0, $options);
     }
 
     /**
-     * 扣减可用余额（余额不足抛异常）
+     * 扣减可用余额（余额不足抛异常，异常携带面向用户的多语言提示）
      */
     public function debit(Model $owner, string $typeCode, int $amount, array $options = []): WalletTransaction
     {
@@ -168,7 +182,7 @@ class WalletManager
 
         $transactionType = $options['transaction_type'] ?? TransactionType::Consume;
 
-        return $this->mutate($wallet, $transactionType, -$amount, -$amount, 0, $options);
+        return $this->mutate($wallet, $type, $transactionType, -$amount, -$amount, 0, $options);
     }
 
     /**
@@ -181,7 +195,7 @@ class WalletManager
         $type = $this->type($typeCode);
         $wallet = $this->resolveOrCreateWallet($owner, $type);
 
-        return $this->mutate($wallet, TransactionType::Freeze, -$amount, -$amount, $amount, $options);
+        return $this->mutate($wallet, $type, TransactionType::Freeze, -$amount, -$amount, $amount, $options);
     }
 
     /**
@@ -194,7 +208,7 @@ class WalletManager
         $type = $this->type($typeCode);
         $wallet = $this->resolveOrCreateWallet($owner, $type);
 
-        return $this->mutate($wallet, TransactionType::Unfreeze, $amount, $amount, -$amount, $options);
+        return $this->mutate($wallet, $type, TransactionType::Unfreeze, $amount, $amount, -$amount, $options);
     }
 
     /**
@@ -207,7 +221,7 @@ class WalletManager
         $type = $this->type($typeCode);
         $wallet = $this->resolveOrCreateWallet($owner, $type);
 
-        return $this->mutate($wallet, TransactionType::FreezeConsume, -$amount, 0, -$amount, $options);
+        return $this->mutate($wallet, $type, TransactionType::FreezeConsume, -$amount, 0, -$amount, $options);
     }
 
     /**
@@ -223,14 +237,15 @@ class WalletManager
         $fromWallet = $this->resolveOrCreateWallet($from, $type);
         $toWallet = $this->resolveOrCreateWallet($to, $type);
 
-        $transferSn = (string) ($options['transfer_sn'] ?? get_sn('wallet', 'T'));
+        // 单号以发起人 id 为掩码：把碰撞概率收敛到「同一用户同秒并发随机数重叠」
+        $transferSn = (string) ($options['transfer_sn'] ?? get_sn($from->getKey(), 'T'));
         $options['transfer_sn'] = $transferSn;
 
         $outUuid = "transfer-out:{$transferSn}";
         $inUuid = "transfer-in:{$transferSn}";
 
         try {
-            return DB::transaction(function () use ($fromWallet, $toWallet, $amount, $options, $outUuid, $inUuid) {
+            return DB::transaction(function () use ($fromWallet, $toWallet, $type, $amount, $options, $outUuid, $inUuid) {
                 $outExisting = Utils::getWalletTransactionModel()::query()->where('uuid', $outUuid)->lockForUpdate()->first();
 
                 if ($outExisting) {
@@ -246,7 +261,7 @@ class WalletManager
                 $toLocked = $locked[$toWallet->id];
 
                 if ($fromLocked->balance < $amount) {
-                    throw new WalletException('Insufficient available balance.');
+                    throw $this->insufficientAvailableException($type);
                 }
 
                 $out = $this->applyChange($fromLocked, TransactionType::TransferOut, -$amount, -$amount, 0, $options, $outUuid);
@@ -280,7 +295,7 @@ class WalletManager
         $type = $this->type($typeCode);
         $teamId = $owner->team_id ?? null;
 
-        $payCurrency = strtoupper((string) ($payCurrency ?? config('sn-wallet.recharge.currency') ?: $this->conversion->baseCurrency()));
+        $payCurrency = strtoupper((string) ($payCurrency ?? Utils::getConfig('recharge.currency') ?: $this->conversion->baseCurrency()));
         $payFee = $this->conversion->convertToCurrency($walletAmount, $type, $payCurrency, $teamId);
 
         $rate = $type->resolveRate($teamId);
@@ -355,13 +370,15 @@ class WalletManager
 
     /**
      * 单钱包原子变动：uuid 幂等 → 行锁 → 下限校验 → 余额 + 流水同事务
+     *
+     * @param  \UnitEnum|string  $transactionType  内置 TransactionType 或已注册的自定义流水类型值
      */
-    protected function mutate(Wallet $wallet, TransactionType $type, int $amount, int $balanceChange, int $frozenChange, array $options): WalletTransaction
+    protected function mutate(Wallet $wallet, WalletType $walletType, $transactionType, int $amount, int $balanceChange, int $frozenChange, array $options): WalletTransaction
     {
         $uuid = (string) ($options['uuid'] ?? Str::uuid()->toString());
 
         try {
-            return DB::transaction(function () use ($wallet, $type, $amount, $balanceChange, $frozenChange, $options, $uuid) {
+            return DB::transaction(function () use ($wallet, $walletType, $transactionType, $amount, $balanceChange, $frozenChange, $options, $uuid) {
                 if ($existing = Utils::getWalletTransactionModel()::query()->where('uuid', $uuid)->lockForUpdate()->first()) {
                     return $existing;        // 幂等重放
                 }
@@ -369,14 +386,14 @@ class WalletManager
                 $locked = Utils::getWalletModel()::query()->lockForUpdate()->findOrFail($wallet->id);
 
                 if ($locked->balance + $balanceChange < 0) {
-                    throw new WalletException('Insufficient available balance.');
+                    throw $this->insufficientAvailableException($walletType);
                 }
 
                 if ($locked->frozen + $frozenChange < 0) {
-                    throw new WalletException('Insufficient frozen balance.');
+                    throw $this->insufficientFrozenException($walletType);
                 }
 
-                return $this->applyChange($locked, $type, $amount, $balanceChange, $frozenChange, $options, $uuid);
+                return $this->applyChange($locked, $transactionType, $amount, $balanceChange, $frozenChange, $options, $uuid);
             });
         } catch (QueryException $e) {
             if ($this->isDuplicateError($e)) {
@@ -390,8 +407,10 @@ class WalletManager
 
     /**
      * 落余额与流水（须在事务 + 行锁内调用）
+     *
+     * @param  \UnitEnum|string  $transactionType  内置 TransactionType 或已注册的自定义流水类型值
      */
-    protected function applyChange(Wallet $wallet, TransactionType $type, int $amount, int $balanceChange, int $frozenChange, array $options, ?string $uuid = null): WalletTransaction
+    protected function applyChange(Wallet $wallet, $transactionType, int $amount, int $balanceChange, int $frozenChange, array $options, ?string $uuid = null): WalletTransaction
     {
         $wallet->balance += $balanceChange;
         $wallet->frozen += $frozenChange;
@@ -404,7 +423,7 @@ class WalletManager
             'uuid' => $uuid ?? (string) Str::uuid(),
             'wallet_id' => $wallet->id,
             'team_id' => $options['team_id'] ?? (current_tenant()?->getKey() ?? $wallet->team_id),
-            'type' => $type,
+            'type' => $transactionType,
             'amount' => $amount,
             'balance_change' => $balanceChange,
             'frozen_change' => $frozenChange,
@@ -446,6 +465,22 @@ class WalletManager
         } catch (QueryException) {
             return $query->firstOrFail();       // 并发双建兜底
         }
+    }
+
+    /**
+     * 余额不足异常（用户可见：抛出点按当前 locale 翻译，含类型名）
+     */
+    protected function insufficientAvailableException(WalletType $type): WalletException
+    {
+        return new WalletException(__('sn-wallet::wallet.errors.insufficient_available', ['type' => $type->name]));
+    }
+
+    /**
+     * 冻结不足异常（用户可见：同上）
+     */
+    protected function insufficientFrozenException(WalletType $type): WalletException
+    {
+        return new WalletException(__('sn-wallet::wallet.errors.insufficient_frozen', ['type' => $type->name]));
     }
 
     protected function assertPositive(int $amount): void

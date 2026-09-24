@@ -168,9 +168,4 @@ class Recharge extends SupportModel implements PayableInterface
             return $recharge;
         });
     }
-
-    public function getMorphClass(): string
-    {
-        return 'sn_wallet_recharge';
-    }
 }
