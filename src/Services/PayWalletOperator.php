@@ -4,9 +4,9 @@ namespace Wsmallnews\Wallet\Services;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\Relation;
-use Wsmallnews\Pay\Contracts\PayerInterface;
 use Wsmallnews\Pay\Contracts\WalletOperator;
 use Wsmallnews\Pay\Support\Utils as PayUtils;
+use Wsmallnews\Support\Contracts\HasSnIdentifiable;
 use Wsmallnews\Wallet\Enums\TransactionType;
 use Wsmallnews\Wallet\WalletManager;
 
@@ -27,7 +27,7 @@ class PayWalletOperator implements WalletOperator
     /**
      * 校验钱包余额是否足够（不扣减，按扣款口径 up 进位换算）
      */
-    public function sufficient(PayerInterface $payer, string $walletType, int $minorAmount, string $orderCurrency): bool
+    public function sufficient(HasSnIdentifiable $payer, string $walletType, int $minorAmount, string $orderCurrency): bool
     {
         $type = $this->wallets->type($walletType);
 
@@ -42,7 +42,7 @@ class PayWalletOperator implements WalletOperator
      * @param  array<string, mixed>  $meta  pay_sn / channel / method / payable{type,id}
      * @return array<string, mixed> 扣减明细（含汇率快照）
      */
-    public function deduct(PayerInterface $payer, string $walletType, int $minorAmount, string $orderCurrency, array $meta = []): array
+    public function deduct(HasSnIdentifiable $payer, string $walletType, int $minorAmount, string $orderCurrency, array $meta = []): array
     {
         $type = $this->wallets->type($walletType);
 
@@ -82,7 +82,7 @@ class PayWalletOperator implements WalletOperator
      * @param  array<string, mixed>  $snapshot  deduct() 的完整返回（或其内层 snapshot）
      * @return array<string, mixed> 回款明细
      */
-    public function credit(PayerInterface $payer, string $walletType, int $minorAmount, string $orderCurrency, array $snapshot, array $meta = []): array
+    public function credit(HasSnIdentifiable $payer, string $walletType, int $minorAmount, string $orderCurrency, array $snapshot, array $meta = []): array
     {
         $type = $this->wallets->type($walletType);
 
@@ -114,7 +114,7 @@ class PayWalletOperator implements WalletOperator
     /**
      * 钱包归属租户（Member 自带 team_id；User 无则 NULL 全局）
      */
-    protected function teamId(PayerInterface $payer): ?int
+    protected function teamId(HasSnIdentifiable $payer): ?int
     {
         return $payer->team_id ?? null;
     }
